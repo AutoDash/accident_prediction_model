@@ -7,6 +7,8 @@ import pdb
 import time
 import matplotlib.pyplot as plt
 import sys
+import csv
+
 
 ############### Global Parameters ###############
 # path
@@ -28,8 +30,8 @@ learning_rate = 0.0001
 n_epochs = 30
 batch_size = 10
 display_step = 10
-shuf_buf = 100
-prefetch_size = 1
+shuf_buf = 100 # Buffer size for random shuffling. shuf_buf > dataset size gives perfect shuffling
+prefetch_size = 1 # How many batches to fetch before current training step is complete
 
 # Network Parameters
 n_input = 4096 # fc6 or fc7(1*4096)
@@ -39,7 +41,11 @@ n_img_hidden = 256 # embedding image features
 n_att_hidden = 256 # embedding object features
 n_classes = 2 # has accident or not
 n_frames = 100 # number of frame in each video 
+dropout_keep_prob = 0.5 # probability of applying dropout to rnn layer
 ##################################################
+
+
+
 
 def parse_args():
     """Parse input arguments."""
@@ -51,17 +57,39 @@ def parse_args():
 
     return args
 
-def _data_augmentations(x, y):
+# output tuple of two lists containing video paths and labels
+def read_csv(path):
+    paths = []
+    labels = []
+    with open(path) as csvfile:
+        csv_reader = csv.reader(csvfile)
+        for row in csv_reader:
+            X,Y = row # Likely to change
+            paths.append(X)
+            labels.append(Y)
+
+    return paths, labels
+
+def tf_load_data(npy_path, label):
+    def _load_data(npy_path, label):
+        return np.load(npy_path), label
+
+    return tf.pyfunc(_load_data, [npy_path, label], [tf.string, tf.string])
+
+def data_augmentations(x, y):
+    # TODO
     return x,y
 
 def build_dataset(filepaths, labels):
-    dataset = Dataset.from_tensor_slices((filepaths, labels))
+    dataset = Dataset.from_tensor_slices(*read_csv(csv_path))
     dataset = dataset.shuffle(shuf_buf, reshuffle_each_iteration=True)
     dataset = dataset.repeat(n_epochs)
-    dataset = dataset.map(_load_data, num_parallel_calls=4)
-    dataset = dataset.map(_data_augmentations, num_parallel_calls=4)
+    dataset = dataset.map(tf_load_data, num_parallel_calls=4)
+    dataset = dataset.map(data_augmentations, num_parallel_calls=4)
     dataset = dataset.batch(batch_size)
-    dataset = dataset.prefetch(prefetch_size);
+    dataset = dataset.prefetch(prefetch_size)
+
+    return dataset
 
 
 """
@@ -90,9 +118,9 @@ def train:
 def build_model():
 
     # tf Graph input
-    x = tf.placeholder("float", [None, n_frames ,n_detection, n_input])
-    y = tf.placeholder("float", [None, n_classes])
-    keep = tf.placeholder("float",[None])
+    dataset = build_dataset();
+    os_iter = dataset.get_one_shot_iterator();
+    x, y = os_iter.get_next();
 
     # Define weights
     weights = {
@@ -113,7 +141,7 @@ def build_model():
     # Define a lstm cell with tensorflow
     lstm_cell = tf.contrib.rnn.LSTMCell(n_hidden,initializer= tf.random_normal_initializer(mean=0.0,stddev=0.01),use_peepholes = True,state_is_tuple = False)
     # using dropout in output of LSTM
-    lstm_cell_dropout = tf.nn.rnn_cell.DropoutWrapper(lstm_cell,output_keep_prob=1 - keep[0])
+    lstm_cell_dropout = tf.nn.rnn_cell.DropoutWrapper(lstm_cell,output_keep_prob=dropout_keep_prob)
     # init LSTM parameters
     istate = tf.zeros([batch_size, lstm_cell.state_size])
     h_prev = tf.zeros([batch_size, n_hidden])
@@ -175,11 +203,11 @@ def build_model():
     # Define loss and optimizer
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss/n_frames) # Adam Optimizer
 
-    return x,keep,y,optimizer,loss,lstm_variables,soft_pred,all_alphas
+    return x,y,optimizer,loss,lstm_variables,soft_pred,all_alphas
 
 def train():
     # build model
-    x,keep,y,optimizer,loss,lstm_variables,soft_pred,all_alphas = build_model()
+    x,y,optimizer,loss,lstm_variables,soft_pred,all_alphas = build_model()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.2)
     sess = tf.InteractiveSession(config=tf.ConfigProto(allow_soft_placement=True,gpu_options=gpu_options))
     # mkdir folder for saving model
@@ -203,7 +231,7 @@ def train():
              batch_data = np.load(train_path+'batch_'+file_name+'.npz')
              batch_xs = batch_data['data']
              batch_ys = batch_data['labels']
-             _,batch_loss = sess.run([optimizer,loss], feed_dict={x: batch_xs, y: batch_ys, keep: [0.5]})
+             _,batch_loss = sess.run([optimizer,loss])
              epoch_loss[batch-1] = batch_loss/batch_size
          # print one epoch
          print "Epoch:", epoch+1, " done. Loss:", np.mean(epoch_loss)
@@ -213,13 +241,13 @@ def train():
          if (epoch+1) %5 == 0:
             saver.save(sess,save_path+"model", global_step = epoch+1)
             print "Training"
-            test_all(sess,train_num,train_path,x,keep,y,loss,lstm_variables,soft_pred)
+            test_all(sess,train_num,train_path,x,y,loss,lstm_variables,soft_pred)
             print "Testing"
-            test_all(sess,test_num,test_path,x,keep,y,loss,lstm_variables,soft_pred)
+            test_all(sess,test_num,test_path,x,y,loss,lstm_variables,soft_pred)
     print "Optimization Finished!"
     saver.save(sess, save_path+"final_model")
 
-def test_all(sess,num,path,x,keep,y,loss,lstm_variables,soft_pred):
+def test_all(sess,num,path,x,y,loss,lstm_variables,soft_pred):
     total_loss = 0.0
 
     for num_batch in range(1,num+1):
@@ -228,7 +256,8 @@ def test_all(sess,num,path,x,keep,y,loss,lstm_variables,soft_pred):
          test_all_data = np.load(path+'batch_'+file_name+'.npz')
          test_data = test_all_data['data']
          test_labels = test_all_data['labels']
-         [temp_loss,pred] = sess.run([loss,soft_pred], feed_dict={x: test_data, y: test_labels, keep: [0.0]})
+         # TODO: remove dropout for testing
+         [temp_loss,pred] = sess.run([loss,soft_pred])
          
          total_loss += temp_loss/batch_size
 
@@ -340,7 +369,7 @@ def evaluation(all_pred,all_labels, total_time = 90, vis = False, length = None)
 
 def vis(model_path):
     # build model
-    x,keep,y,optimizer,loss,lstm_variables,soft_pred,all_alphas = build_model()
+    x,y,optimizer,loss,lstm_variables,soft_pred,all_alphas = build_model()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
     sess = tf.InteractiveSession(config=tf.ConfigProto(allow_soft_placement=True,gpu_options=gpu_options))
     init = tf.global_variables_initializer()
@@ -403,7 +432,7 @@ def vis(model_path):
 
 def test(model_path):
     # load model
-    x,keep,y,optimizer,loss,lstm_variables,soft_pred,all_alphas = build_model()
+    x,y,optimizer,loss,lstm_variables,soft_pred,all_alphas = build_model()
     # inistal Session
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
     sess = tf.InteractiveSession(config=tf.ConfigProto(allow_soft_placement=True,gpu_options=gpu_options))
@@ -413,9 +442,9 @@ def test(model_path):
     saver.restore(sess, model_path)
     print "model restore!!!"
     print "Training"
-    test_all(sess,train_num,train_path,x,keep,y,loss,lstm_variables,soft_pred)
+    test_all(sess,train_num,train_path,x,y,loss,lstm_variables,soft_pred)
     print "Testing"
-    test_all(sess,test_num,test_path,x,keep,y,loss,lstm_variables,soft_pred)
+    test_all(sess,test_num,test_path,x,y,loss,lstm_variables,soft_pred)
 
 
 
