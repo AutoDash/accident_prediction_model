@@ -81,7 +81,7 @@ def data_augmentations(x, y):
     return x,y
 
 def build_dataset(filepaths, labels):
-    dataset = Dataset.from_tensor_slices(*read_csv(csv_path))
+    dataset = Dataset.from_tensor_slices((filepaths, labels))
     dataset = dataset.shuffle(shuf_buf, reshuffle_each_iteration=True)
     dataset = dataset.repeat(n_epochs)
     dataset = dataset.map(tf_load_data, num_parallel_calls=4)
@@ -118,7 +118,7 @@ def train:
 def build_model():
 
     # tf Graph input
-    dataset = build_dataset();
+    dataset = build_dataset(*read_csv(csv_path));
     os_iter = dataset.get_one_shot_iterator();
     x, y = os_iter.get_next();
 
