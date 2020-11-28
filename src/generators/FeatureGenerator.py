@@ -25,10 +25,11 @@ class FeatureGenerator():
         self.DEBUG = DEBUG
 
     # Extract annotations from csv
-    def from_csv(self, csv_path, csv_delimiter='\t'):
+    def from_csv(self, csv_path, csv_delimiter=','):
         data = defaultdict(list)
         with open(csv_path, 'r') as fcsv:
             reader = csv.reader(fcsv, delimiter=csv_delimiter)
+            header = next(reader)
             for row in reader:
                 frame, ID, cls, x1, y1, x2, y2, has_collision = row
 
@@ -43,7 +44,7 @@ class FeatureGenerator():
     # Extract spatial features from a single video
     def from_video(self, data, video_path):
         if not os.path.exists(video_path): raise RuntimeError("File does not exist: {}".format(video_path))
-
+        print(f'Opening video {video_path}')
         vnpy = skvideo.io.vread(video_path)
 
         feature_vector = np.zeros((self.max_num_frames, self.num_detections + 1, self.feature_dim))
