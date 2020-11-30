@@ -19,12 +19,13 @@ class MockObjectDetector():
 fg = FeatureGenerator(max_num_frames=max_num_frames,
                       num_detections=num_detections,
                       feature_dim=feature_dim,
-                      #ObjectDetectorInitializer=MockObjectDetector,
+                      ObjectDetectorInitializer=MockObjectDetector,
                       DEBUG=DEBUG)
 
 fg.generate_smallcorgi_features(video_dir='./videos',
                                 csv_dir='./csvs',
-                                out_dir=generated_feature_dir)
+                                out_dir=generated_feature_dir,
+                                csv_delimiter='\t')
 
 
 

@@ -44,7 +44,6 @@ class FeatureGenerator():
     # Extract spatial features from a single video
     def from_video(self, data, video_path):
         if not os.path.exists(video_path): raise RuntimeError("File does not exist: {}".format(video_path))
-        print(f'Opening video {video_path}')
         vnpy = skvideo.io.vread(video_path)
 
         feature_vector = np.zeros((self.max_num_frames, self.num_detections + 1, self.feature_dim))
@@ -52,40 +51,42 @@ class FeatureGenerator():
         objects        = np.zeros((self.max_num_frames, self.num_detections + 1, 224, 224, 3))
 
         # Crop Bounding Boxes and run vgg
-        bb_index = 0
-        frame = data['frame'][0]
-        for i in range(len(data['frame'])):
-            if (bb_index >= self.num_detections):
-                print("Using fewer object detections ({}) than what's available.".format(self.num_detections))
-                continue
+        i = 0
+        for frame in range(1, self.max_num_frames+1):
 
-            assert data['frame'][i] >= frame
-            if (data['frame'][i] > frame): bb_index = 0
-            frame = data['frame'][i]
-            x1, y1, x2, y2 = data['bb'][i]
+            bb_index = 0
+            while (i < len(data['frame']) and frame == data['frame'][i]):
+                assert data['frame'][i] >= frame
+                if (bb_index >= self.num_detections):
+                    print("Using fewer object detections ({}) than what's available.".format(self.num_detections))
+                    continue
 
-            cropped_object = vnpy[frame-1, y1:y2, x1:x2, :]
-            cropped_object = skimage.transform.resize(cropped_object, (224,224))
+                x1, y1, x2, y2 = data['bb'][i]
 
-            if self.DEBUG: 
-                plt.imshow(cropped_object)
-                plt.show()
+                cropped_object = vnpy[frame-1, y1:y2, x1:x2, :]
+                cropped_object = skimage.transform.resize(cropped_object, (224,224))
 
-            cropped_object = cropped_object[np.newaxis, ...]
-            cropped_object = preprocess_vgg_input(cropped_object)
+                if self.DEBUG: 
+                    plt.imshow(cropped_object)
+                    plt.show()
 
-            objects[frame-1, bb_index, ...] = cropped_object
-            det_vector[frame-1, bb_index, :] = [x1, y1, x2, y2]
+                cropped_object = cropped_object[np.newaxis, ...]
+                cropped_object = preprocess_vgg_input(cropped_object)
 
-            bb_index += 1
+                objects[frame-1, bb_index, ...] = cropped_object
+                det_vector[frame-1, bb_index, :] = [x1, y1, x2, y2]
 
-        # Run VGG on full images
-        full_frame = vnpy[frame-1, ...]
-        full_frame = skimage.transform.resize(full_frame, (224,224))
-        full_frame = full_frame[np.newaxis, ...]
-        full_frame = preprocess_vgg_input(full_frame)
+                bb_index += 1
+                i += 1
 
-        objects[frame-1, bb_index, ...] = full_frame
+            # Run VGG on full images
+            full_frame = vnpy[frame-1, ...]
+            full_frame = skimage.transform.resize(full_frame, (224,224))
+            full_frame = full_frame[np.newaxis, ...]
+            full_frame = preprocess_vgg_input(full_frame)
+
+            objects[frame-1, bb_index, ...] = full_frame
+
 
         feature_vector = self.vgg.predict( \
                             objects.reshape(self.max_num_frames * (self.num_detections+1), 224, 224, 3)) \
@@ -94,7 +95,7 @@ class FeatureGenerator():
         return feature_vector, det_vector
 
 
-    def generate_smallcorgi_features(self, video_dir, csv_dir, out_dir='./npz_data', batch_size=10, shuffle=True):
+    def generate_smallcorgi_features(self, video_dir, csv_dir, out_dir='./npz_data', batch_size=10, shuffle=True, csv_delimiter=','):
         smallcorgi_features = np.zeros((batch_size, self.max_num_frames, self.num_detections + 1, self.feature_dim))
         smallcorgi_labels   = np.zeros((batch_size, 2))
         smallcorgi_dets     = np.zeros((batch_size, self.max_num_frames, self.num_detections, 4))
@@ -110,7 +111,7 @@ class FeatureGenerator():
             csv_p = os.path.join(csv_dir, csv_fn)
             vid_p = os.path.join(video_dir, "{}.mp4".format(os.path.splitext(csv_fn)[0]))
 
-            csv_f = self.from_csv(csv_p)
+            csv_f = self.from_csv(csv_p, csv_delimiter=csv_delimiter)
             vid_f, vid_det = self.from_video(csv_f, vid_p)
 
             has_collision = sum(csv_f['has_collision']) != 0
