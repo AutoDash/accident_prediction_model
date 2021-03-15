@@ -118,7 +118,7 @@ class FeatureGenerator():
 
             smallcorgi_features[i % batch_size, ...] = vid_f
             smallcorgi_dets[i % batch_size, ...]     = vid_det
-            smallcorgi_labels[i % batch_size, ...]   = [has_collision, 1-has_collision]
+            smallcorgi_labels[i % batch_size, ...]   = [1-has_collision, has_collision]
             smallcorgi_ids[i % batch_size, ...]      = os.path.splitext(csv_fn)[0]
 
             # Save batch in .npz
