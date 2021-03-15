@@ -37,7 +37,7 @@ class FeatureGenerator():
                 data['ID'].append(ID)
                 data['class'].append(cls)
                 data['bb'].append((int(x1),int(y1),int(x2),int(y2)))
-                data['collision'] = int(has_collision)
+                data['has_collision'] = int(has_collision)
 
         return data
 
