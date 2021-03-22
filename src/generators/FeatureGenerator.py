@@ -37,7 +37,7 @@ class FeatureGenerator():
                 data['ID'].append(ID)
                 data['class'].append(cls)
                 data['bb'].append((int(x1),int(y1),int(x2),int(y2)))
-                data['has_collision'] = int(has_collision)
+                data['has_collision'].append(int(has_collision))
 
         return data
 
@@ -45,47 +45,59 @@ class FeatureGenerator():
     def from_video(self, data, video_path):
         if not os.path.exists(video_path): raise RuntimeError("File does not exist: {}".format(video_path))
         vnpy = skvideo.io.vread(video_path)
+        vf, vh, vw, vd = vnpy.shape
+
+        if self.DEBUG:
+            print("Before padding: ", vnpy.shape)
+
+        # Pad start of video with 0s to force 100 frames
+        pad_len = self.max_num_frames - vf
+        if pad_len:
+            zero_padding = np.zeros((pad_len, vh, vw, vd))
+            vnpy = np.concatenate((zero_padding, vnpy), axis=0)
+
+        vnpy = vnpy.astype(np.int)
+
+        if self.DEBUG:
+            print("After padding: ", vnpy.shape)
+
+        # Reorganize bbs to remove holes
+        frame_bbs = [[] for _ in range(self.max_num_frames)]
+        for frame_with_bb, bb in zip(data['frame'], data['bb']):
+            frame_bbs[frame_with_bb+pad_len].append(bb)
 
         feature_vector = np.zeros((self.max_num_frames, self.num_detections + 1, self.feature_dim))
         det_vector     = np.zeros((self.max_num_frames, self.num_detections, 4))
         objects        = np.zeros((self.max_num_frames, self.num_detections + 1, 224, 224, 3))
 
         # Crop Bounding Boxes and run vgg
-        i = 0
-        for frame in range(1, self.max_num_frames+1):
-
-            bb_index = 0
-            while (i < len(data['frame']) and frame == data['frame'][i]):
-                assert data['frame'][i] >= frame
-                if (bb_index >= self.num_detections):
+        for frame in range(self.max_num_frames):
+            for i, (x1, y1, x2, y2) in enumerate(frame_bbs[frame]):
+                if (i >= self.num_detections):
                     print("Using fewer object detections ({}) than what's available.".format(self.num_detections))
-                    continue
+                    break
 
-                x1, y1, x2, y2 = data['bb'][i]
-
-                cropped_object = vnpy[frame-1, y1:y2, x1:x2, :]
-                cropped_object = skimage.transform.resize(cropped_object, (224,224))
+                cropped_object = vnpy[frame, y1:y2, x1:x2, :]
+                cropped_object = skimage.transform.resize(cropped_object, (224,224), preserve_range=True).astype(np.int)
 
                 if self.DEBUG: 
+                    print(f"FRAME: {frame}, BBs: {x1}, {y1}, {x2}, {y2}")
                     plt.imshow(cropped_object)
                     plt.show()
 
                 cropped_object = cropped_object[np.newaxis, ...]
                 cropped_object = preprocess_vgg_input(cropped_object)
 
-                objects[frame-1, bb_index, ...] = cropped_object
-                det_vector[frame-1, bb_index, :] = [x1, y1, x2, y2]
-
-                bb_index += 1
-                i += 1
+                objects[frame, i+1, ...] = cropped_object
+                det_vector[frame, i, :] = [x1, y1, x2, y2]
 
             # Run VGG on full images
-            full_frame = vnpy[frame-1, ...]
-            full_frame = skimage.transform.resize(full_frame, (224,224))
+            full_frame = vnpy[frame, ...]
+            full_frame = skimage.transform.resize(full_frame, (224,224), preserve_range=True).astype(int)
             full_frame = full_frame[np.newaxis, ...]
             full_frame = preprocess_vgg_input(full_frame)
 
-            objects[frame-1, bb_index, ...] = full_frame
+            objects[frame, 0, ...] = full_frame
 
 
         feature_vector = self.vgg.predict( \
