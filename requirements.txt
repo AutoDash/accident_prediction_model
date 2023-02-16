@@ -11,5 +11,5 @@ pkg-resources==0.0.0
 protobuf==3.11.3
 tensorflow==1.15.2
 termcolor==1.1.0
-Werkzeug==1.0.0
+Werkzeug==2.2.3
 wrapt==1.11.2
